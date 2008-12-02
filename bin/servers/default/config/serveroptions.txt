@@ -27,7 +27,7 @@ staffguilds = Server,Manager,Owner,Admin,FAQ,LAT,NAT,GAT,GP,GP Chief,Bugs Admin,
 
 # Accounts which are recognized by the server as staff.  To be allowed access to RC, your account must be here.
 # (Manager) and the like are just placeholders to organize the list.  They are not guilds.
-staff = Seipheroth
+staff = (Manager),YOURACCOUNT
 
 # Enables/disables item dropping from various sources.
 # bushitems also affects certain tiles other than bushes.
@@ -123,7 +123,7 @@ maxplayers = 128
 onlystaff = false
 
 # If true, the server doesn't show up in the server list.
-underconstruction = true
+underconstruction = false
 
 # Set to true to disable the folder configuration.
 nofoldersconfig = true
@@ -140,10 +140,6 @@ language = English
 serverip = AUTO
 serverport = 14802
 
-# The information of the computer hosting the npc-server. This gets send to all RC's.
-npcserverip = AUTO
-npcserverport = 14850
-
 # Specifies the location of the list server.
 # DON'T CHANGE IF YOU DON'T KNOW WHAT YOU ARE DOING.
 listip = listserver.graal.in
@@ -152,5 +148,3 @@ listport = 14900
 # Console settings.
 detailedconsole = false
 showconsolepackets = false
-
-version = 1.0

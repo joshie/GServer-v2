@@ -32,6 +32,7 @@ enum
 	SVO_PLYRREM		= 15,
 	SVO_PING		= 16,
 	SVO_VERIACC2	= 17,
+	SVO_SETLOCALIP	= 18,
 };
 
 enum
@@ -59,10 +60,10 @@ class TServerList
 		// Constructor - Deconstructor
 		TServerList();
 		~TServerList();
-		void setServer(TServer* pServer) { server = pServer; }
+		void setServer(TServer* pServer) { boost::recursive_mutex::scoped_lock lock(m_preventChange); server = pServer; }
 
 		// Socket-Control Functions
-		bool getConnected();
+		bool getConnected() const;
 		bool main();
 		bool init(const CString& pserverIp, const CString& pServerPort = "14900");
 		bool connectServer();
@@ -110,6 +111,9 @@ class TServerList
 		CSocket sock;
 		time_t lastData, lastPing, lastTimer;
 		TServer* server;
+
+		boost::mutex m_sendPacket, m_sendCompress;
+		mutable boost::recursive_mutex m_preventChange;
 };
 
 // Packet-Functions

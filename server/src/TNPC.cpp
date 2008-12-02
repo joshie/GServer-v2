@@ -7,8 +7,8 @@
 #include "TLevel.h"
 #include "TMap.h"
 
-char __nSavePackets[10] = { 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 };
-char __nAttrPackets[30] = { 36, 37, 38, 39, 40, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68 };
+const char __nSavePackets[10] = { 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 };
+const char __nAttrPackets[30] = { 36, 37, 38, 39, 40, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68 };
 
 static CString toWeaponName(const CString& code);
 
@@ -78,6 +78,7 @@ TNPC::~TNPC()
 
 CString TNPC::getProp(unsigned char pId) const
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	switch(pId)
 	{
 		case NPCPROP_IMAGE:
@@ -228,6 +229,7 @@ CString TNPC::getProps(time_t newTime) const
 
 void TNPC::setProps(CString& pProps)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	int len = 0;
 	while (pProps.bytesLeft() > 0)
 	{
@@ -395,7 +397,7 @@ void TNPC::setProps(CString& pProps)
 				pProps.readChars(pProps.readGShort());
 			break;
 
-			// Location, in pixels, of the npc on the level in 2.2+ clients.
+			// Location, in pixels, of the npc on the level in 2.3+ clients.
 			// Bit 0x0001 controls if it is negative or not.
 			// Bits 0xFFFE are the actual value.
 			case NPCPROP_X2:
@@ -405,7 +407,7 @@ void TNPC::setProps(CString& pProps)
 				x2 >>= 1;
 				if ((short)len & 0x0001) x2 = -x2;
 
-				// Let pre-2.2+ clients see 2.2+ movement.
+				// Let pre-2.3+ clients see 2.3+ movement.
 				x = (float)x2 / 16.0f;
 				break;
 
@@ -416,7 +418,7 @@ void TNPC::setProps(CString& pProps)
 				y2 >>= 1;
 				if ((short)len & 0x0001) y2 = -y2;
 
-				// Let pre-2.2+ clients see 2.2+ movement.
+				// Let pre-2.3+ clients see 2.3+ movement.
 				y = (float)y2 / 16.0f;
 				break;
 

@@ -44,7 +44,7 @@ function project_dynamic(name, lang, kind)
 	{
 		"native-char",
 		"unicode",
-		"no-rtti"
+--		"no-rtti"
 	}
 	package.includepaths =
 	{
@@ -63,7 +63,7 @@ function project_dynamic(name, lang, kind)
 	debug.target = name..(DEBUG_DLL_SUFFIX or "")
 	debug.defines =
 	{
-	"_DEBUG"
+		"_DEBUG"
 	}
 	debug.buildflags = {}
 

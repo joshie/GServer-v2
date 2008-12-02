@@ -52,8 +52,9 @@ TServerList::~TServerList()
 /*
 	Socket-Control Functions
 */
-bool TServerList::getConnected()
+bool TServerList::getConnected() const
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	return isConnected;
 }
 
@@ -79,7 +80,7 @@ bool TServerList::main()
 
 	// do we have enough data to parse?
 	rBuffer.setRead(0);
-	if (rBuffer.length() > 0)
+	while (rBuffer.length() != 0)
 	{
 		// parse data
 		if ((lineEnd = rBuffer.findl('\n')) == -1)
@@ -107,6 +108,7 @@ bool TServerList::main()
 
 bool TServerList::doTimedEvents()
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	lastTimer = time(0);
 
 	// Send a ping every 30 seconds.
@@ -121,6 +123,8 @@ bool TServerList::doTimedEvents()
 
 bool TServerList::init(const CString& pServerIp, const CString& pServerPort)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
+
 	// Initialize the socket.
 	if (sock.init(pServerIp, pServerPort) != 0)
 		return false;
@@ -130,6 +134,7 @@ bool TServerList::init(const CString& pServerIp, const CString& pServerPort)
 
 bool TServerList::connectServer()
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	CSettings* settings = server->getSettings();
 
 	if (isConnected == true)
@@ -141,14 +146,19 @@ bool TServerList::connectServer()
 	else
 		return false;
 
-	server->getServerLog().out("%s - Connected.\n", sock.getDescription());
+	server->getServerLog().out(":: %s - Connected.\n", sock.getDescription());
 
 	// Set Some Stuff
 	setName(settings->getStr("name"));
 	setDesc(settings->getStr("description"));
 	setUrl(settings->getStr("url"));
-	setVersion(settings->getStr("version"));
+	setVersion(GSERVER_VERSION);
 	setIp(settings->getStr("serverip", "AUTO"));
+	CString localip = sock.getLocalIp();
+	if (localip == "127.0.1.1" || localip == "127.0.0.1")
+		server->getServerLog().out(CString() << "** [WARNING] Socket returned " << localip << " for its local ip!  Not sending local ip to serverlist.");
+	else
+		sendPacket(CString() >> (char)SVO_SETLOCALIP << sock.getLocalIp());
 	setPort(settings->getStr("serverport", "14900"));
 	sendCompress();
 
@@ -170,6 +180,7 @@ void TServerList::sendPacket(CString& pPacket)
 		pPacket.writeChar('\n');
 
 	// append buffer
+	boost::mutex::scoped_lock lock_sendPacket(m_sendPacket);
 	sBuffer.write(pPacket);
 }
 
@@ -195,11 +206,14 @@ void TServerList::remPlayer(const CString& pAccountName, int pType)
 
 void TServerList::sendPlayers()
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
+
 	// Definition
 	CString playerPacket;
 	int playerCount = 0;
 
 	// Iterate Playerlist
+	boost::recursive_mutex::scoped_lock lock_playerList(server->m_playerList);
 	for (std::vector<TPlayer *>::iterator i = server->getPlayerList()->begin(); i != server->getPlayerList()->end();)
 	{
 		TPlayer *pPlayer = (TPlayer*)*i;
@@ -227,32 +241,38 @@ void TServerList::sendPlayers()
 */
 void TServerList::setDesc(const CString& pServerDesc)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	sendPacket(CString() >> (char)SVO_SETDESC << pServerDesc);
 }
 
 void TServerList::setIp(const CString& pServerIp)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	sendPacket(CString() >> (char)SVO_SETIP << pServerIp);
 }
 
 void TServerList::setName(const CString& pServerName)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	bool uc = server->getSettings()->getBool("underconstruction", false);
 	sendPacket(CString() >> (char)SVO_SETNAME << (uc ? "U " : "") << pServerName);
 }
 
 void TServerList::setPort(const CString& pServerPort)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	sendPacket(CString() >> (char)SVO_SETPORT << pServerPort);
 }
 
 void TServerList::setUrl(const CString& pServerUrl)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	sendPacket(CString() >> (char)SVO_SETURL << pServerUrl);
 }
 
 void TServerList::setVersion(const CString& pServerVersion)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	sendPacket(CString() >> (char)SVO_SETVERS << pServerVersion);
 }
 
@@ -274,6 +294,9 @@ void TServerList::parsePacket(CString& pPacket)
 
 void TServerList::sendCompress()
 {
+	boost::mutex::scoped_lock lock_sendPacket(m_sendPacket);
+	boost::mutex::scoped_lock lock_sendCompress(m_sendCompress);
+
 	// empty buffer?
 	if (sBuffer.isEmpty())
 		return;
@@ -298,22 +321,76 @@ void TServerList::msgSVI_VERIACC(CString& pPacket)
 
 void TServerList::msgSVI_VERIGUILD(CString& pPacket)
 {
-	server->getServerLog().out("TODO: TServerList::msgSVI_VERIGUILD\n");
+	unsigned short playerID = pPacket.readGUShort();
+	CString nickname = pPacket.readChars(pPacket.readGUChar());
+
+	TPlayer* p = server->getPlayer(playerID);
+	if (p)
+	{
+		// Create the prop packet.
+		CString prop = CString() >> (char)PLPROP_NICKNAME >> (char)nickname.length() << nickname;
+
+		// Assign the nickname to the player.
+		p->setNick(nickname, true);
+		p->sendPacket(CString() >> (char)PLO_PLAYERPROPS << prop);
+
+		// Tell everybody else the new nickname.
+		server->sendPacketToAll(CString() >> (char)PLO_OTHERPLPROPS >> (short)playerID << prop);
+	}
 }
 
 void TServerList::msgSVI_FILESTART(CString& pPacket)
 {
-	server->getServerLog().out("TODO: TServerList::msgSVI_FILESTART\n");
+	CString blank, filename = CString() << "global/" << pPacket.readChars(pPacket.readGUChar());
+	CFileSystem::fixPathSeparators(&filename);
+	blank.save(filename);
+	server->getFileSystem()->addFile(filename);
 }
 
 void TServerList::msgSVI_FILEDATA(CString& pPacket)
 {
-	server->getServerLog().out("TODO: TServerList::msgSVI_FILEDATA\n");
+	CString filename = server->getFileSystem()->find(pPacket.readChars(pPacket.readGUChar()));
+	if (filename.length() == 0) return;
+	CString filedata;
+	filedata.load(filename);
+	filedata << pPacket.readString("").B64_Decode();
+	filedata.save(filename);
 }
 
 void TServerList::msgSVI_FILEEND(CString& pPacket)
 {
-	server->getServerLog().out("TODO: TServerList::msgSVI_FILEEND\n");
+	CString filename = pPacket.readChars(pPacket.readGUChar());
+	unsigned short pid = pPacket.readGUShort();
+	unsigned char type = pPacket.readGUChar();
+
+	TPlayer* p = server->getPlayer(pid);
+	if (p)
+	{
+		switch (type)
+		{
+			case 0:	// head
+				p->setProps(CString() >> (char)PLPROP_HEADGIF >> (char)(filename.length() + 100) << filename, true, true);
+				break;
+
+			case 1:	// body
+				p->setProps(CString() >> (char)PLPROP_BODYIMG >> (char)filename.length() << filename, true, true);
+				break;
+
+			case 2:	// sword
+			{
+				CString prop = p->getProp(PLPROP_SWORDPOWER);
+				p->setProps(CString() >> (char)PLPROP_SWORDPOWER >> (char)prop.readGUChar() >> (char)filename.length() << filename, true, true);
+				break;
+			}
+
+			case 3:	// shield
+			{
+				CString prop = p->getProp(PLPROP_SHIELDPOWER);
+				p->setProps(CString() >> (char)PLPROP_SHIELDPOWER >> (char)prop.readGUChar() >> (char)filename.length() << filename, true, true);
+				break;
+			}
+		}
+	}
 }
 
 void TServerList::msgSVI_VERSIONOLD(CString& pPacket)
@@ -329,7 +406,89 @@ void TServerList::msgSVI_VERSIONCURRENT(CString& pPacket)
 
 void TServerList::msgSVI_PROFILE(CString& pPacket)
 {
-	server->getServerLog().out("TODO: TServerList::msgSVI_PROFILE\n");
+	TPlayer* p1 = server->getPlayer(pPacket.readGUShort());
+	TPlayer* p2 = server->getPlayer(pPacket.readChars(pPacket.readGUChar()));
+	if (p1 == 0 || p2 == 0) return;
+
+	// Start the profile string.
+	CString profile;
+	profile << p2->getProp(PLPROP_ACCOUNTNAME) << pPacket.readString("");
+
+	// Add the time to the profile string.
+	int time = p2->getProp(PLPROP_ONLINESECS).readGInt();
+	CString line = CString() << CString((int)time/3600) << " hrs "
+		<< CString((int)(time/60)%60) << " mins "
+		<< CString((int)time%60) << " secs";
+	profile >> (char)line.length() << line;
+
+	// Add all the specified variables to the profile string.
+	CString profileVars = server->getSettings()->getStr("profilevars");
+	if (profileVars.length() != 0)
+	{
+		std::vector<CString> vars = profileVars.tokenize(",");
+		for (std::vector<CString>::iterator i = vars.begin(); i != vars.end(); ++i)
+		{
+			CString name = i->readString(":=").trim();
+			CString val = i->readString("").trim();
+
+			// Built-in values.
+			if (val == "playerkills")
+				val = CString((unsigned int)(p2->getProp(PLPROP_KILLSCOUNT).readGUInt()));
+			else if (val == "playerdeaths")
+				val = CString((unsigned int)(p2->getProp(PLPROP_DEATHSCOUNT).readGUInt()));
+			else if (val == "playerfullhearts")
+				val = CString((int)p2->getProp(PLPROP_MAXPOWER).readGUChar());
+			else if (val == "playerrating")
+			{
+				int rating = p2->getProp(PLPROP_RATING).readGUInt();
+				val = CString((int)((rating >> 9) & 0xFFF)) << "/" << CString((int)(rating & 0x1FF));
+			}
+			else if (val == "playerap")
+				val = CString((int)p2->getProp(PLPROP_ALIGNMENT).readGChar());
+			else if (val == "playerrupees")
+				val = CString((int)p2->getProp(PLPROP_RUPEESCOUNT).readGUInt());
+			else if (val == "playerswordpower")
+			{
+				char sp = p2->getProp(PLPROP_SWORDPOWER).readGChar();
+				if (sp > 4) sp -= 30;
+				val = CString((int)sp);
+			}
+			else if (val == "canspin")
+				val = ((p2->getProp(PLPROP_STATUS).readGUChar() & PLSTATUS_HASSPIN) ? "true" : "false");
+			else if (val == "playerhearts")
+			{
+				unsigned char power = p2->getProp(PLPROP_CURPOWER).readGUChar();
+				val = CString((int)(power / 2));
+				if (power % 2 == 1) val << ".5";
+			}
+			else if (val == "playerdarts")
+				val = CString((int)p2->getProp(PLPROP_ARROWSCOUNT).readGUChar());
+			else if (val == "playerbombs")
+				val = CString((int)p2->getProp(PLPROP_BOMBSCOUNT).readGUChar());
+			else if (val == "playermp")
+				val = CString((int)p2->getProp(PLPROP_MAGICPOINTS).readGUChar());
+			else if (val == "playershieldpower")
+			{
+				char sp = p2->getProp(PLPROP_SHIELDPOWER).readGChar();
+				if (sp > 3) sp -= 10;
+				val = CString((int)sp);
+			}
+			else if (val == "playerglovepower")
+				val = CString((int)p2->getProp(PLPROP_GLOVEPOWER).readGUChar());
+			else
+			{
+				// Flag values.
+				CString flag = p2->getFlag(val);
+				if (flag.length() != 0) val = flag;
+			}
+
+			// Add it to the profile now.
+			profile >> (char)(name.length() + val.length() + 2) << name << ":=" << val;
+		}
+	}
+
+	// Send the profiles.
+	p1->sendPacket(CString() >> (char)PLO_PROFILE << profile);
 }
 
 void TServerList::msgSVI_ERRMSG(CString& pPacket)
@@ -352,7 +511,6 @@ void TServerList::msgSVI_VERIACC2(CString& pPacket)
 	if (message != "SUCCESS")
 	{
 		player->sendPacket(CString() >> (char)PLO_DISCMESSAGE << message);
-		player->sendCompress();
 		player->disconnect();
 		return;
 	}

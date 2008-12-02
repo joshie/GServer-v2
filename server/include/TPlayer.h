@@ -6,6 +6,7 @@
 #include "ICommon.h"
 #include "IUtil.h"
 #include "CSocket.h"
+#include "CFileQueue.h"
 #include "TServer.h"
 #include "TAccount.h"
 #include "TLevel.h"
@@ -55,16 +56,20 @@ enum
 	PLI_WEAPONADD		= 33,
 	PLI_UPDATEFILE		= 34,
 	PLI_ADJACENTLEVEL	= 35,
-	PLI_HITOBJECTS		= 36,	// TODO
+	PLI_HITOBJECTS		= 36,
 	PLI_LANGUAGE		= 37,
 	PLI_TRIGGERACTION	= 38,
 	PLI_MAPINFO			= 39,
 	PLI_SHOOT			= 40,
 	PLI_UNKNOWN46		= 46,	// Always is 1.  Might be a player count for the gmap level.
-
-	PLI_RC_CHAT         = 79,
-
+	PLI_UNKNOWN47		= 47,	// Seems to tell the server the modTime of update files.  Used for client updates.
+	PLI_RC_CHAT			= 79,
+	PLI_PROFILEGET		= 80,
+	PLI_PROFILESET		= 81,
+	PLI_UNKNOWN152		= 152,	// Gets a value from the GraalEngine (or a server-side NPC?) (probably a database)
+	PLI_UNKNOWN154		= 154,	// Sets a value on the GraalEngine (or a server-side NPC?) (probably a database)
 	PLI_UNKNOWN157		= 157,	// Something to do with ganis.
+	PLI_UPDATESCRIPT	= 158,	// {158}{script} Requests a script from the server.
 };
 
 enum
@@ -115,17 +120,19 @@ enum
 	PLO_DEFAULTWEAPON	= 43,
 	PLO_HASNPCSERVER	= 44,	// If sent, the client won't update npc props.
 	PLO_FILEUPTODATE	= 45,
+	PLO_HITOBJECTS		= 46,
 	PLO_STAFFGUILDS		= 47,
 	PLO_TRIGGERACTION	= 48,
 	PLO_PLAYERWARP2		= 49,	// Bytes 1-3 are x/y/z. 4 = level x in gmap, 5 = level y in gmap.
 	PLO_ADDPLAYER		= 55,
-
 	PLO_DELPLAYER		= 56,
 	PLO_LARGEFILESTART	= 68,
 	PLO_LARGEFILEEND	= 69,
 	PLO_EMPTY73			= 73,
 	PLO_RCMESSAGE		= 74,
-	PLO_NPCSERVERADDR   = 79,   // Bytes 1-2 are 0 and 2, followed by a string formatted as <ipaddr>,<port>.
+	PLO_PROFILE			= 75,
+	PLO_NPCSERVERADDR	= 79,
+	PLO_UNKNOWN82		= 82,	// Answers PLI_UNKNOWN152's request.
 	PLO_LARGEFILESIZE	= 84,
 	PLO_RAWDATA			= 100,
 	PLO_BOARDPACKET		= 101,
@@ -146,7 +153,10 @@ enum
 	PLO_LISTPROCESSES	= 182,
 	PLO_EMPTY190		= 190,	// Was blank.  Sent before weapon list.
 	PLO_EMPTY194		= 194,	// Was blank.  Sent before weapon list.
-	PLO_EMPTY197		= 197,	// Related to npcserver.  Seems to register npcs on the client.
+
+	// Seems to register NPCs or something on the client.
+	// Also is related to PLI_UPDATESCRIPT as it sends the last modification time of the NPC/weapon.  The v5 client stores weapon scripts offline.
+	PLO_EMPTY197		= 197,	// Seems to register npcs on the client.  Also is used by client to see if it needs to get a newer version of the offline cache of the NPC.
 };
 
 enum
@@ -158,6 +168,7 @@ enum
 enum
 {
 	PLSTATUS_PAUSED			= 0x01,
+	PLSTATUS_HIDDEN			= 0x02,
 	PLSTATUS_MALE			= 0x04,
 	PLSTATUS_DEAD			= 0x08,
 	PLSTATUS_ALLOWWEAPONS	= 0x10,
@@ -176,11 +187,12 @@ class TPlayer : public TAccount
 {
 	public:
 		// Constructor - Deconstructor
-		TPlayer(TServer* pServer, CSocket *pSocket = 0);
+		TPlayer(TServer* pServer, CSocket* pSocket, int pId);
 		~TPlayer();
+		void operator()();
 
 		// Manage Account
-		inline bool isLoggedIn();
+		inline bool isLoggedIn() const;
 		bool sendLogin();
 
 		// Get Properties
@@ -189,9 +201,11 @@ class TPlayer : public TAccount
 		int getId() const;
 		int getType() const;
 		time_t getLastData() const	{ return lastData; }
+		CString getFlag(const CString& flag) const;
 
 		// Set Properties
-		void setNick(CString& pNickName);
+		void setChat(const CString& pChat);
+		void setNick(CString& pNickName, bool force = false);
 		void setId(int pId);
 
 		// Level manipulation
@@ -204,18 +218,17 @@ class TPlayer : public TAccount
 		// Prop-Manipulation
 		CString getProp(int pPropId);
 		void setProps(CString& pPacket, bool pForward = false, bool pForwardToSelf = false);
-		void sendProps(bool *pProps, int pCount);
-		CString getProps(bool *pProps, int pCount);
+		void sendProps(const bool *pProps, int pCount);
+		CString getProps(const bool *pProps, int pCount);
 
 		// Socket-Functions
 		bool doMain();
-		void sendCompress();
 		void sendPacket(CString pPacket);
 
 		// Misc functions.
 		bool doTimedEvents();
 		void disconnect();
-		void processChat(CString& pChat);
+		void processChat(CString pChat);
 
 		// Packet-Functions
 		bool msgPLI_NULL(CString& pPacket);
@@ -250,19 +263,19 @@ class TPlayer : public TAccount
 		bool msgPLI_HURTPLAYER(CString& pPacket);
 		bool msgPLI_EXPLOSION(CString& pPacket);
 		bool msgPLI_PRIVATEMESSAGE(CString& pPacket);
-		bool msgPLI_SHOOT(CString& pPacket);
-
 		bool msgPLI_NPCWEAPONDEL(CString& pPacket);
 		bool msgPLI_WEAPONADD(CString& pPacket);
 		bool msgPLI_UPDATEFILE(CString& pPacket);
 		bool msgPLI_ADJACENTLEVEL(CString& pPacket);
+		bool msgPLI_HITOBJECTS(CString& pPacket);
 		bool msgPLI_LANGUAGE(CString& pPacket);
 		bool msgPLI_TRIGGERACTION(CString& pPacket);
 		bool msgPLI_MAPINFO(CString& pPacket);
 		bool msgPLI_UNKNOWN46(CString& pPacket);
-
-		// RC Chat...
 		bool msgPLI_RC_CHAT(CString& pPacket);
+		bool msgPLI_PROFILEGET(CString& pPacket);
+		bool msgPLI_PROFILESET(CString& pPacket);
+		bool msgPLI_SHOOT(CString& pPacket);
 
 	private:
 		// Login functions.
@@ -275,31 +288,36 @@ class TPlayer : public TAccount
 
 		// Socket Variables
 		CSocket *playerSock;
-		CString rBuffer, sBuffer, oBuffer;
+		CString rBuffer;
 
-		// Pre 2.2 encryption.
-		int iterator;
+		// Encryption
 		unsigned char key;
-
-		// Post 2.2 encryption.
-		bool PLE_POST22;
 		codec in_codec;
-		codec out_codec;
 
 		// Variables
 		CString version, os;
 		int codepage;
 		TLevel *level;
 		int id, type;
-		time_t lastData, lastMovement, lastChat, lastMessage, lastSave;
-		TServer* server;
+		time_t lastData, lastMovement, lastChat, lastNick, lastMessage, lastSave;
 		std::vector<SCachedLevel*> cachedLevels;
 		bool allowBomb;
 		bool hadBomb;
 		TMap* pmap;
+		int carryNpcId;
+		bool carryNpcThrown;
+
+		// File queue.
+		CFileQueue fileQueue;
+		boost::thread* fileQueueThread;
+
+		// Mutexes
+		mutable boost::recursive_mutex m_preventChange;
+
+		bool disconnectPlayer;
 };
 
-inline bool TPlayer::isLoggedIn()
+inline bool TPlayer::isLoggedIn() const
 {
 	return (type != CLIENTTYPE_AWAIT && id > 0);
 }
@@ -316,6 +334,7 @@ inline int TPlayer::getType() const
 
 inline void TPlayer::setId(int pId)
 {
+	boost::recursive_mutex::scoped_lock lock(m_preventChange);
 	id = pId;
 }
 
