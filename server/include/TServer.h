@@ -196,6 +196,7 @@ class TServer : public CSocketStub
 
 		TServerList serverlist;
 		time_t lastTimer, lastNWTimer, last1mTimer, last5mTimer, last3mTimer;
+		time_t lastServerPlayerlist;	// John: For server.playerlist strings.
 
 #ifdef UPNP
 		CUPNP upnp;

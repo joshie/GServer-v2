@@ -34,6 +34,7 @@ TServer::TServer(CString pName)
 #endif
 {
 	lastTimer = lastNWTimer = last1mTimer = last5mTimer = last3mTimer = time(0);
+	lastServerPlayerlist = time(0);		// John
 
 	// This has the full path to the server directory.
 	serverpath = CString() << getHomePath() << "servers/" << name << "/";
@@ -390,6 +391,57 @@ bool TServer::doTimedEvents()
 				else ++i;
 			}
 		}
+	}
+
+	// John: Save the playerlist to server. strings for use with the map NPC.
+	// Every 3 seconds, save the playerlist to server. strings.
+	if ((int)difftime(lastTimer, lastServerPlayerlist) >= 3)
+	{
+		lastServerPlayerlist = lastTimer;
+
+		// Set the playerlist size.
+		int old_count = 0;
+		std::map<CString, CString>::iterator old_count_iter = mServerFlags.find("server.playerlist_count");
+		if (old_count_iter != mServerFlags.end()) old_count = strtoint(old_count_iter->second);
+		if (old_count != playerList.size())
+			setFlag("server.playerlist_count", CString((int)playerList.size()));
+
+		// Assemble the player flags.
+		int count = 0;
+		for (std::vector<TPlayer*>::iterator i = playerList.begin(); i != playerList.end(); ++i)
+		{
+			TPlayer* player = *i;
+
+			// Assemble the flag.
+			CString flag;
+			flag << player->getAccountName() << "\n";
+			flag << player->getHeadImage() << "\n";
+			if (player->getLevel() == 0)
+				flag << "\n";
+			else flag << player->getLevel()->getActualLevelName() << "\n";
+			flag << CString(player->getX()) << "\n";
+			flag << CString(player->getY()) << "\n";
+			flag << player->getNickname() << "\n";
+			flag.gtokenizeI();
+
+			// Add the flag now.
+			setFlag(CString("server.playerlist_") << CString((int)count++), flag);
+		}
+
+		// Remove any old flags.
+		std::vector<CString> toDelete;
+		for (std::map<CString, CString>::iterator i = mServerFlags.begin(); i != mServerFlags.end(); ++i)
+		{
+			if (i->first == "server.playerlist_count") continue;
+			if (i->first.subString(0, 18) == "server.playerlist_")
+			{
+				unsigned int id = strtoint(i->first.subString(18));
+				if (id >= playerList.size())
+					toDelete.push_back(i->first);
+			}
+		}
+		for (std::vector<CString>::iterator i = toDelete.begin(); i != toDelete.end(); ++i)
+			deleteFlag(*i);
 	}
 
 	return true;
